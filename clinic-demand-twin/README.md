@@ -6,12 +6,12 @@ Smart Demand Signals per al repte d'Inibsa a Interhack 2026.
 
 Clinic Demand Twin transforma històrics de compra de clíniques dentals en alertes comercials accionables.
 
-Per cada parella `client_id + family_id`, l'app calcula un comportament esperat i el compara amb el comportament observat recent. Quan hi ha una desviació rellevant, genera una alerta amb motiu, prioritat, urgència, valor potencial, canal recomanat i una explicació.
+Per cada parella `client_id + family_id`, l'app calcula un comportament esperat amb regles explicables basades en l'històric i el compara amb el comportament observat recent. Quan hi ha una desviació rellevant, genera una alerta amb motiu, prioritat, urgència, valor potencial, canal recomanat i una explicació.
 
 ## Instal·lació
 
 ```bash
-cd "/Users/mohameddaribachiri/Documents/Interhack 2026/interhack2026/clinic-demand-twin"
+cd interhack2026/clinic-demand-twin
 pip install -r requirements.txt
 ```
 
@@ -152,7 +152,7 @@ Commodities:
 
 - Agrega vendes mensuals per client i família.
 - Calcula `capture_rate = historical_avg_units / monthly_potential_units`.
-- Classifica clients com `loyal`, `promiscuous` o `marginal`.
+- Classifica internament clients com `loyal`, `promiscuous` o `marginal`; a la UI es mostra com alta captura, captura parcial o captura baixa.
 - Genera `capture_window`, `churn_risk`, `anomalous_drop` o `replenishment_expected` segons desviació recent, potencial i perfil.
 
 Productes tècnics:
@@ -186,6 +186,8 @@ Pantalles incloses:
 - `Alert Detail`: explicació, recomanació, expected vs observed, potencial i variables clau.
 - `Feedback`: registre d'accions comercials.
 
+El detall d'alerta mostra la data màxima del dataset com a data del model, una banda històrica P10-P90 quan hi ha prou historial i oculta el potencial quan la font real no aporta una estimació útil.
+
 El feedback es desa a:
 
 ```text
@@ -209,4 +211,3 @@ El generador crea:
 - El potencial de l'Excel real es normalitza a unitats aproximades dividint euros per preu mitjà.
 - Les campanyes de l'Excel real no venen lligades a família, així que es repliquen per família durant la normalització.
 - El feedback encara no recalibra el model.
-

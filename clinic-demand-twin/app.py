@@ -41,11 +41,17 @@ ALERT_COLORS = {
     "anomalous_drop": "#7c2d12",
 }
 URGENCY_COLORS = {"high": "#dc2626", "medium": "#f59e0b", "low": "#16a34a"}
+CLASSIFICATION_LABELS = {
+    "loyal": "alta captura histórica",
+    "promiscuous": "captura parcial",
+    "marginal": "captura baja",
+}
 
 
 @st.cache_data(show_spinner="Carregant i processant dades...")
 def build_pipeline() -> dict:
     sales, clients, products, potential, campaigns = load_all_data()
+    model_date = pd.to_datetime(sales["date"]).max() if not sales.empty else pd.NaT
     historical_months, reference_months = get_reference_periods(sales, n_recent=2)
     agg = aggregate_by_family_month(sales, products)
     commodity_stats = compute_commodity_stats(agg, potential, products, historical_months, reference_months)
@@ -53,7 +59,7 @@ def build_pipeline() -> dict:
         sales,
         products,
         reference_months,
-        reference_end_date=pd.to_datetime(sales["date"]).max() if not sales.empty else None,
+        reference_end_date=model_date,
     )
     campaigns_by_family = campaign_calendar(campaigns)
     alerts = generate_all_alerts(
@@ -79,6 +85,7 @@ def build_pipeline() -> dict:
         "reference_months": reference_months,
         "alerts": alerts,
         "source": sales.attrs.get("source", "desconeguda"),
+        "model_date": model_date,
     }
 
 
@@ -99,6 +106,8 @@ with st.sidebar:
     page = st.radio("Navegació", ["Overview", "Alert Ranking", "Alert Detail", "Feedback"])
     st.divider()
     st.caption(f"Font de dades: {data['source']}")
+    if pd.notna(data["model_date"]):
+        st.caption(f"Data del model: {data['model_date'].date()}")
     st.caption(f"Període recent: {', '.join(sorted(reference_months)) or '-'}")
     st.caption(f"Alertes generades: {len(alerts_df)}")
 
@@ -107,6 +116,16 @@ def _empty_alerts_guard() -> None:
     if alerts_df.empty:
         st.warning("No s'han generat alertes amb les dades actuals.")
         st.stop()
+
+
+def _units_or_na(value) -> str:
+    if value is None or pd.isna(value) or float(value) <= 0:
+        return "n/d"
+    return f"{float(value):,.1f}"
+
+
+def _classification_label(value) -> str:
+    return CLASSIFICATION_LABELS.get(value, value or "-")
 
 
 if page == "Overview":
@@ -271,12 +290,14 @@ elif page == "Alert Detail":
         st.markdown("#### Senyal")
         st.metric("Expected units", f"{alert['expected_units']:,.1f}")
         st.metric("Observed units", f"{alert['observed_units']:,.1f}")
-        st.metric("Potential units", f"{alert['potential_units']:,.1f}")
-        st.metric("Uncaptured demand", f"{alert['uncaptured_demand']:,.1f}")
+        st.metric("Potential units", _units_or_na(alert.get("potential_units")))
+        st.metric("Uncaptured demand", _units_or_na(alert.get("uncaptured_demand")))
         if alert["category_type"] == "commodity":
             capture_rate = alert.get("capture_rate")
             st.metric("Capture rate", f"{capture_rate * 100:.0f}%" if pd.notna(capture_rate) else "-")
-            st.metric("Classificació", alert.get("client_classification") or "-")
+            st.metric("Classificació", _classification_label(alert.get("client_classification")))
+            if alert.get("potential_imputed"):
+                st.caption("Potencial estimat internament a partir de l'històric.")
         else:
             st.metric("Dies sense compra", f"{int(alert.get('days_since_last_purchase') or 0)}")
             st.metric("Interval medià", f"{int(alert.get('median_interpurchase_days') or 0)} dies")
@@ -288,9 +309,35 @@ elif page == "Alert Detail":
     all_months = sorted(historical_months | reference_months)
     monthly = pd.DataFrame({"year_month": all_months}).merge(monthly, on="year_month", how="left")
     monthly["units"] = monthly["units"].fillna(0)
-    hist_avg = monthly[monthly["year_month"].isin(historical_months)]["units"].mean() if historical_months else 0
+    hist_units = monthly[monthly["year_month"].isin(historical_months)]["units"] if historical_months else pd.Series(dtype=float)
+    hist_avg = hist_units.mean() if not hist_units.empty else 0
+    hist_p10 = hist_units.quantile(0.10) if len(hist_units) >= 4 else None
+    hist_p90 = hist_units.quantile(0.90) if len(hist_units) >= 4 else None
 
     fig = go.Figure()
+    if hist_p10 is not None and hist_p90 is not None and pd.notna(hist_p10) and pd.notna(hist_p90):
+        fig.add_trace(
+            go.Scatter(
+                x=monthly["year_month"],
+                y=[hist_p90] * len(monthly),
+                mode="lines",
+                line={"width": 0},
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=monthly["year_month"],
+                y=[hist_p10] * len(monthly),
+                mode="lines",
+                name="Banda histórica P10-P90",
+                fill="tonexty",
+                fillcolor="rgba(17, 24, 39, 0.12)",
+                line={"width": 0},
+                hoverinfo="skip",
+            )
+        )
     fig.add_trace(
         go.Bar(
             x=monthly["year_month"],
@@ -316,15 +363,16 @@ elif page == "Alert Detail":
     ]
     if not potential_match.empty:
         monthly_potential = float(potential_match.iloc[0]["monthly_potential_units"])
-        fig.add_trace(
-            go.Scatter(
-                x=monthly["year_month"],
-                y=[monthly_potential] * len(monthly),
-                mode="lines",
-                name="Monthly potential",
-                line={"color": "#f59e0b", "dash": "dot"},
+        if monthly_potential > 0:
+            fig.add_trace(
+                go.Scatter(
+                    x=monthly["year_month"],
+                    y=[monthly_potential] * len(monthly),
+                    mode="lines",
+                    name="Monthly potential",
+                    line={"color": "#f59e0b", "dash": "dot"},
+                )
             )
-        )
     fig.update_layout(height=360, xaxis_title="Mes", yaxis_title="Unitats", legend_orientation="h")
     st.plotly_chart(fig, use_container_width=True)
 

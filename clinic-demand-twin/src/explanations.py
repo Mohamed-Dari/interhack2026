@@ -11,6 +11,12 @@ ACTION_BY_CHANNEL = {
     "marketing_automation": "Activar una secuencia automática con recordatorio de reposición y oferta de la familia.",
 }
 
+CLASSIFICATION_LABELS = {
+    "loyal": "alta captura histórica",
+    "promiscuous": "captura parcial",
+    "marginal": "captura baja",
+}
+
 
 def _num(value, decimals: int = 0) -> str:
     if value is None or pd.isna(value):
@@ -26,25 +32,31 @@ def _campaign_sentence(row: pd.Series) -> str:
     return ""
 
 
+def _classification_label(value) -> str:
+    return CLASSIFICATION_LABELS.get(value, value or "sin clasificar")
+
+
 def _commodity_explanation(row: pd.Series) -> str:
     clinic = row.get("clinic_name", "La clínica")
     family = row.get("family_name", "la familia")
     capture = float(row.get("capture_rate") or 0) * 100
-    classification = row.get("client_classification") or "sin clasificar"
+    classification = _classification_label(row.get("client_classification"))
     campaign = _campaign_sentence(row)
+    potential_note = " El potencial usado es una estimación interna basada en histórico." if row.get("potential_imputed") else ""
 
     if row.get("alert_type") == "capture_window":
         return (
             f"{clinic} presenta demanda no capturada en {family}. "
             f"El potencial esperado para el periodo es {_num(row.get('potential_units'))} unidades y se observaron "
             f"{_num(row.get('observed_units'))}. Su captura histórica es del {capture:.0f}% "
-            f"(perfil {classification}), por lo que existe una ventana razonable de captura frente a competencia."
+            f"({classification}), por lo que existe una ventana razonable de aumentar cuota."
+            f"{potential_note}"
             f"{campaign} Recomendación: {row.get('recommended_action')}"
         )
 
     if row.get("alert_type") == "churn_risk":
         return (
-            f"{clinic} muestra riesgo de fuga en {family}. Esperábamos "
+            f"{clinic} muestra una caída compatible con riesgo comercial en {family}. Esperábamos "
             f"{_num(row.get('expected_units'))} unidades según su patrón histórico, pero se observaron "
             f"{_num(row.get('observed_units'))}. El cliente era {classification}, con captura histórica "
             f"del {capture:.0f}%."
@@ -86,7 +98,7 @@ def _technical_explanation(row: pd.Series) -> str:
     if row.get("alert_type") == "churn_risk":
         return (
             f"{clinic} lleva {days} días sin comprar {family}, cuando su patrón habitual es cada "
-            f"{median} días. La ausencia reciente encaja con riesgo de fuga o sustitución por competencia."
+            f"{median} días. La ausencia reciente es compatible con una pausa prolongada; conviene verificar actividad, stock o cambio de proveedor."
             f"{campaign} Recomendación: {row.get('recommended_action')}"
         )
 

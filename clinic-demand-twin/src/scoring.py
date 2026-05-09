@@ -60,8 +60,8 @@ def score_alerts(alerts_df: pd.DataFrame, clients_df: pd.DataFrame) -> pd.DataFr
     df["recommended_channel"] = df.apply(lambda row: _channel(row, row["clinic_segment"]), axis=1)
 
     severity_gap = df.apply(_severity_gap, axis=1)
-    max_revenue = max(float(df["estimated_revenue_opportunity"].max() or 0), 1)
-    revenue_norm = (df["estimated_revenue_opportunity"] / max_revenue * 100).clip(0, 100)
+    p95_revenue = max(float(df["estimated_revenue_opportunity"].quantile(0.95) or 0), 1)
+    revenue_norm = (df["estimated_revenue_opportunity"].clip(upper=p95_revenue) / p95_revenue * 100).clip(0, 100)
     urgency_score = df["urgency"].map(URGENCY_SCORE).fillna(20)
     confidence_score = df["confidence"].map(CONFIDENCE_SCORE).fillna(60)
 
