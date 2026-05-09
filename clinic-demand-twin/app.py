@@ -1,4 +1,4 @@
-"""Clinic Demand Twin Streamlit app."""
+"""Aplicación Streamlit de Clinic Demand Twin."""
 
 from __future__ import annotations
 

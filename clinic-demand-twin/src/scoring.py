@@ -1,4 +1,4 @@
-"""Scoring, urgency and commercial routing."""
+"""Scoring, urgencia y enrutamiento comercial."""
 
 from __future__ import annotations
 

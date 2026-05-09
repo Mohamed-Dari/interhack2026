@@ -1,4 +1,4 @@
-"""Preprocessing and feature engineering for demand signals."""
+"""Preprocesamiento y generación de variables para señales de demanda."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import pandas as pd
 
 
 def get_reference_periods(sales_df: pd.DataFrame, n_recent: int = 2) -> tuple[set[str], set[str]]:
-    """Return historical months and recent reference months as YYYY-MM strings."""
+    """Devuelve meses históricos y meses recientes de referencia como cadenas YYYY-MM."""
     if sales_df.empty:
         return set(), set()
     months = pd.to_datetime(sales_df["date"]).dt.to_period("M").astype(str)
@@ -18,7 +18,7 @@ def get_reference_periods(sales_df: pd.DataFrame, n_recent: int = 2) -> tuple[se
 
 
 def aggregate_by_family_month(sales_df: pd.DataFrame, products_df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate sales by client, product family and month."""
+    """Agrega ventas por cliente, familia de producto y mes."""
     if sales_df.empty:
         return pd.DataFrame(
             columns=[
@@ -70,7 +70,7 @@ def compute_commodity_stats(
     historical_months: set[str],
     reference_months: set[str],
 ) -> pd.DataFrame:
-    """Compute per-client commodity baselines and recent observations."""
+    """Calcula líneas base y observaciones recientes para commodities por cliente."""
     combos = _base_combinations(agg_df, potential_df, products_df, "commodity")
     if combos.empty:
         return pd.DataFrame()
@@ -146,7 +146,7 @@ def compute_technical_stats(
     reference_months: set[str],
     reference_end_date=None,
 ) -> pd.DataFrame:
-    """Compute inter-purchase features for technical families."""
+    """Calcula variables de intervalo entre compras para familias técnicas."""
     if sales_df.empty:
         return pd.DataFrame()
 
@@ -211,7 +211,7 @@ def compute_technical_stats(
 
 
 def campaign_calendar(campaigns_df: pd.DataFrame) -> dict[int, dict[str, list[str]]]:
-    """Return {family_id: {YYYY-MM: [campaign names]}}."""
+    """Devuelve {family_id: {YYYY-MM: [nombres de campaña]}}."""
     calendar: dict[int, dict[str, list[str]]] = {}
     if campaigns_df.empty:
         return calendar

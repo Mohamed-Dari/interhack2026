@@ -1,4 +1,4 @@
-"""Business-rule signal generation for Clinic Demand Twin."""
+"""Generación de señales mediante reglas de negocio para Clinic Demand Twin."""
 
 from __future__ import annotations
 

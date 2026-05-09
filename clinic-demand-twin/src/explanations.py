@@ -1,4 +1,4 @@
-"""Template-based explanations. No LLM is used."""
+"""Explicaciones basadas en plantillas. No se usa ningún LLM."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Synthetic data generator for a reliable hackathon demo."""
+"""Generador de datos sintéticos para una demo fiable de hackathon."""
 
 from __future__ import annotations
 

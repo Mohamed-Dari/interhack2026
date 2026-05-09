@@ -1,8 +1,8 @@
 """
-Lightweight feedback persistence via CSV.
-No model recalibration happens here — this data is the foundation for
-future supervised learning (False Positive → raise thresholds;
-Recovered → validate alert efficacy).
+Persistencia ligera del feedback mediante CSV.
+Aquí no se recalibra el modelo: estos datos son la base para
+aprendizaje supervisado futuro (False Positive -> subir umbrales;
+Recovered -> validar la eficacia de la alerta).
 """
 
 import os
@@ -60,7 +60,7 @@ def load_feedback() -> pd.DataFrame:
 
 
 def feedback_status_map(feedback_df: pd.DataFrame) -> dict:
-    """Return {alert_id: last_status} for display in alert table."""
+    """Devuelve {alert_id: ultimo_estado} para mostrarlo en la tabla de alertas."""
     if feedback_df.empty:
         return {}
     latest = (
