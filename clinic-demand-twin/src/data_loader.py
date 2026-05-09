@@ -1,9 +1,9 @@
 """
 Carga de datos para Clinic Demand Twin.
 
-Orden de prioridad:
-1. CSV locales normalizados en data/
-2. Excel real de Inibsa, normalizado y cacheado en data/
+Orden de prioridad en modo auto:
+1. Excel real de Inibsa, normalizado y cacheado en data/
+2. CSV locales normalizados en data/ como fallback
 3. Datos sintéticos de demo generados por src.mock_data
 
 Esquema interno:
@@ -278,9 +278,6 @@ def load_all_data(data_dir: str | Path = DATA_DIR, source: str | None = None) ->
             df.attrs["source"] = "Dades sintètiques"
         return frames
 
-    if selected in {"auto", "csv"} and _csvs_exist(data_dir):
-        return _load_from_csvs(data_dir)
-
     if selected in {"auto", "excel"}:
         path = _excel_path()
         if path is not None:
@@ -289,6 +286,12 @@ def load_all_data(data_dir: str | Path = DATA_DIR, source: str | None = None) ->
             return frames
         if selected == "excel":
             raise FileNotFoundError("No s'ha trobat Datasets.xlsx a les rutes esperades.")
+
+    if selected in {"auto", "csv"}:
+        if _csvs_exist(data_dir):
+            return _load_from_csvs(data_dir)
+        if selected == "csv":
+            raise FileNotFoundError("No se han encontrado los CSV normalizados en data/.")
 
     from src.mock_data import generate_all_data
 

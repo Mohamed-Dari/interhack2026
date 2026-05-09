@@ -35,8 +35,8 @@ CLINIC_TWIN_DATA_SOURCE=excel streamlit run app.py
 
 Fonts de dades suportades:
 
-- `data/*.csv`: si existeixen, són la font principal.
-- `../Inibsa challenge/Datasets.xlsx`: si no hi ha CSV, es normalitza l'Excel real i es desa a `data/`.
+- `../Inibsa challenge/Datasets.xlsx`: és la font principal en mode automàtic. Es normalitza i es desa a `data/`.
+- `data/*.csv`: fallback/cache local si l'Excel no està disponible.
 - Mock data: si no hi ha CSV ni Excel, es generen dades sintètiques.
 
 El dataset original del repte és l'Excel `Datasets.xlsx`. Els CSV no són el format original lliurat per Inibsa: són una capa normalitzada que genera l'app perquè la lògica analítica sigui més simple, ràpida i estable durant la demo.
@@ -209,5 +209,4 @@ El generador crea:
 - El potencial de l'Excel real es normalitza a unitats aproximades dividint euros per preu mitjà.
 - Les campanyes de l'Excel real no venen lligades a família, així que es repliquen per família durant la normalització.
 - El feedback encara no recalibra el model.
-
 
