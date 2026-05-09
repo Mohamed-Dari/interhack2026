@@ -7,11 +7,12 @@ Orden de prioridad en modo auto:
 3. Datos sintéticos de demo generados por src.mock_data
 
 Esquema interno:
-- sales: date, client_id, product_id, units, revenue
-- clients: client_id, clinic_name, city, region, clinic_segment
-- products: product_id, product_name, family_id, family_name, category_type
-- potential: client_id, family_id, monthly_potential_units
-- campaigns: campaign_id, family_id, start_date, end_date, campaign_name
+- sales: invoice_id, date, client_id, product_id, units, revenue
+- clients: client_id, clinic_name, city, region, clinic_segment, source_customer_group
+- products: product_id, product_name, family_id, family_name, category_type,
+  source_block, source_category, source_family
+- potential: client_id, family_id, monthly_potential_units, columnas de auditoría de potencial
+- campaigns: campaign_id, family_id, start_date, end_date, campaign_name, family_mapping_inferred
 """
 
 from __future__ import annotations
@@ -108,6 +109,7 @@ def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
     ventas = xl.parse("Ventas")
     ventas = ventas.rename(
         columns={
+            "Num.Fact": "invoice_id",
             "Fecha": "date",
             "Id. Cliente": "client_id",
             "Id.Cliente": "client_id",
@@ -117,14 +119,16 @@ def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
             "Valores_H": "revenue",
         }
     )
-    sales = ventas[["date", "client_id", "product_id", "units", "revenue"]].copy()
+    sales = ventas[["invoice_id", "date", "client_id", "product_id", "units", "revenue"]].copy()
     sales["date"] = pd.to_datetime(sales["date"], errors="coerce")
+    sales["invoice_id"] = pd.to_numeric(sales["invoice_id"], errors="coerce")
     sales["client_id"] = pd.to_numeric(sales["client_id"], errors="coerce")
     sales["product_id"] = pd.to_numeric(sales["product_id"], errors="coerce")
     sales["units"] = pd.to_numeric(sales["units"], errors="coerce")
     sales["revenue"] = pd.to_numeric(sales["revenue"], errors="coerce")
     sales = sales.dropna(subset=["date", "client_id", "product_id", "units", "revenue"])
     sales = sales[sales["units"] > 0].copy()
+    sales["invoice_id"] = sales["invoice_id"].astype("Int64")
     sales["client_id"] = sales["client_id"].astype(int)
     sales["product_id"] = sales["product_id"].astype(int)
 
@@ -161,12 +165,34 @@ def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
     products["family_name"] = [item[0] for item in display]
     products["category_type"] = [item[1] for item in display]
     products["product_name"] = "Producto " + products["product_id"].astype(str)
-    products = products[["product_id", "product_name", "family_id", "family_name", "category_type"]]
+    products["source_block"] = products["block"]
+    products["source_category"] = products["category_name"]
+    products["source_family"] = products["source_family"]
+    products = products[
+        [
+            "product_id",
+            "product_name",
+            "family_id",
+            "family_name",
+            "category_type",
+            "source_block",
+            "source_category",
+            "source_family",
+        ]
+    ]
 
     cli_raw = xl.parse("Clientes")
-    cli_raw = cli_raw.rename(columns={"Id. Cliente": "client_id", "Id.Cliente": "client_id", "Provincia": "region"})
-    clients = cli_raw[["client_id", "region"]].dropna(subset=["client_id"]).copy()
+    cli_raw = cli_raw.rename(
+        columns={
+            "Id. Cliente": "client_id",
+            "Id.Cliente": "client_id",
+            "Unnamed: 1": "source_customer_group",
+            "Provincia": "region",
+        }
+    )
+    clients = cli_raw[["client_id", "source_customer_group", "region"]].dropna(subset=["client_id"]).copy()
     clients["client_id"] = clients["client_id"].astype(int)
+    clients["source_customer_group"] = clients["source_customer_group"].astype("Int64")
     clients["region"] = clients["region"].fillna("Desconocido")
     clients["city"] = clients["region"]
     clients["clinic_name"] = "Clínica " + clients["client_id"].astype(str)
@@ -184,7 +210,7 @@ def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
         sales_for_segment["clinic_segment"] = "small"
     clients = clients.merge(sales_for_segment[["client_id", "clinic_segment"]], on="client_id", how="left")
     clients["clinic_segment"] = clients["clinic_segment"].fillna("small")
-    clients = clients[["client_id", "clinic_name", "city", "region", "clinic_segment"]]
+    clients = clients[["client_id", "clinic_name", "city", "region", "clinic_segment", "source_customer_group"]]
 
     sales_with_family = sales.merge(products[["product_id", "family_id"]], on="product_id", how="left")
     price_by_family = (
@@ -237,9 +263,14 @@ def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
         expanded_potential["allocated_annual_revenue"] / 12 / expanded_potential["avg_unit_price"].clip(lower=0.01)
     )
     potential = (
-        expanded_potential.groupby(["client_id", "family_id"])["monthly_potential_units"]
-        .sum()
-        .reset_index()
+        expanded_potential.groupby(["client_id", "family_id"], as_index=False)
+        .agg(
+            monthly_potential_units=("monthly_potential_units", "sum"),
+            allocated_annual_potential_revenue=("allocated_annual_revenue", "sum"),
+            source_annual_potential_revenue=("annual_potential_revenue", "sum"),
+            source_category=("category_name", lambda s: " | ".join(sorted(set(map(str, s.dropna()))))),
+            source_family=("potential_family", lambda s: " | ".join(sorted(set(map(str, s.dropna()))))),
+        )
     )
 
     camp_raw = xl.parse("Campañas")
@@ -254,7 +285,17 @@ def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
     campaigns["campaign_id"] = [
         f"real_{i}_{family_id}" for i, family_id in zip(campaigns.index + 1, campaigns["family_id"])
     ]
-    campaigns = campaigns[["campaign_id", "family_id", "start_date", "end_date", "campaign_name"]]
+    campaigns["family_mapping_inferred"] = True
+    campaigns = campaigns[
+        [
+            "campaign_id",
+            "family_id",
+            "start_date",
+            "end_date",
+            "campaign_name",
+            "family_mapping_inferred",
+        ]
+    ]
 
     for df in (sales, clients, products, potential, campaigns):
         df.attrs["source"] = "Excel Inibsa normalitzat"

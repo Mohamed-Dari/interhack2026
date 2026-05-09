@@ -106,10 +106,11 @@ El fitxer adjunt d'Inibsa té aquests fulls:
 
 ## Contracte normalitzat intern
 
-L'app converteix `Datasets.xlsx` a aquests CSV interns a `data/`. Aquest és el contracte que consumeixen `preprocessing.py`, `signal_engine.py` i el dashboard.
+L'app converteix `Datasets.xlsx` a aquests CSV interns a `data/`. Les columnes següents són el contracte mínim que consumeixen `preprocessing.py`, `signal_engine.py` i el dashboard. A més, es conserven columnes d'auditoria de l'Excel original per poder traçar d'on surt cada camp.
 
 `sales.csv`
 
+- `invoice_id`
 - `date`
 - `client_id`
 - `product_id`
@@ -123,6 +124,7 @@ L'app converteix `Datasets.xlsx` a aquests CSV interns a `data/`. Aquest és el 
 - `city`
 - `region`
 - `clinic_segment`
+- `source_customer_group`
 
 `products.csv`
 
@@ -131,12 +133,19 @@ L'app converteix `Datasets.xlsx` a aquests CSV interns a `data/`. Aquest és el 
 - `family_id`
 - `family_name`
 - `category_type`: `commodity` o `technical`
+- `source_block`
+- `source_category`
+- `source_family`
 
 `potential.csv`
 
 - `client_id`
 - `family_id`
 - `monthly_potential_units`
+- `allocated_annual_potential_revenue`
+- `source_annual_potential_revenue`
+- `source_category`
+- `source_family`
 
 `campaigns.csv`
 
@@ -145,6 +154,7 @@ L'app converteix `Datasets.xlsx` a aquests CSV interns a `data/`. Aquest és el 
 - `start_date`
 - `end_date`
 - `campaign_name`
+- `family_mapping_inferred`
 
 ## Lògica d'alertes
 
