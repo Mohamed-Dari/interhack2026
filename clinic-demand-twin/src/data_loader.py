@@ -34,11 +34,7 @@ CSV_FILES = {
     "campaigns": DATA_DIR / "campaigns.csv",
 }
 
-EXCEL_CANDIDATES = [
-    PROJECT_ROOT.parent / "Inibsa challenge" / "Datasets.xlsx",
-    PROJECT_ROOT.parent.parent / "Inibsa challenge" / "Datasets.xlsx",
-    PROJECT_ROOT.parent / "interhack2026" / "Inibsa challenge" / "Datasets.xlsx",
-]
+EXCEL_PATH = PROJECT_ROOT.parent / "Inibsa challenge" / "Datasets.xlsx"
 
 FAMILY_DISPLAY = {
     ("Categoria C1", "Familia C1"): ("Anestesia", "commodity"),
@@ -61,10 +57,7 @@ def _csvs_exist(data_dir: Path = DATA_DIR) -> bool:
 
 
 def _excel_path() -> Path | None:
-    for path in EXCEL_CANDIDATES:
-        if path.exists():
-            return path
-    return None
+    return EXCEL_PATH if EXCEL_PATH.exists() else None
 
 
 def _ensure_required(name: str, df: pd.DataFrame) -> None:
