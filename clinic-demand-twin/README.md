@@ -39,7 +39,9 @@ Fonts de dades suportades:
 - `data/*.csv`: fallback/cache local si l'Excel no està disponible.
 - Mock data: si no hi ha CSV ni Excel, es generen dades sintètiques.
 
-El dataset original del repte és l'Excel `Datasets.xlsx`. Els CSV no són el format original lliurat per Inibsa: són una capa normalitzada que genera l'app perquè la lògica analítica sigui més simple, ràpida i estable durant la demo.
+El dataset original del repte és l'Excel `Datasets.xlsx`. Els CSV normalitzats no són el format original lliurat per Inibsa: són una capa normalitzada que genera l'app perquè la lògica analítica sigui més simple, ràpida i estable durant la demo.
+
+Quan es carrega l'Excel, també es genera una còpia literal de cada full a `data/raw_excel/`. Aquests CSV conserven les columnes originals i no s'utilitzen directament pel model; serveixen per auditoria i traçabilitat.
 
 ## Estructura
 
@@ -49,6 +51,12 @@ clinic-demand-twin/
   requirements.txt
   README.md
   data/
+    raw_excel/
+      potencial.csv
+      clientes.csv
+      productos.csv
+      ventas.csv
+      campanas.csv
     sales.csv
     clients.csv
     products.csv

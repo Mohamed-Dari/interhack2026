@@ -35,6 +35,14 @@ CSV_FILES = {
     "campaigns": DATA_DIR / "campaigns.csv",
 }
 
+RAW_SHEET_FILES = {
+    "Potencial": "potencial.csv",
+    "Clientes": "clientes.csv",
+    "Productos": "productos.csv",
+    "Ventas": "ventas.csv",
+    "Campañas": "campanas.csv",
+}
+
 EXCEL_PATH = PROJECT_ROOT.parent / "Inibsa challenge" / "Datasets.xlsx"
 
 FAMILY_DISPLAY = {
@@ -83,6 +91,14 @@ def _save_csvs(
     campaigns.to_csv(data_dir / "campaigns.csv", index=False)
 
 
+def _save_raw_excel_csvs(xl: pd.ExcelFile, data_dir: Path = DATA_DIR) -> None:
+    raw_dir = data_dir / "raw_excel"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    for sheet_name, file_name in RAW_SHEET_FILES.items():
+        raw_df = xl.parse(sheet_name)
+        raw_df.to_csv(raw_dir / file_name, index=False)
+
+
 def _load_from_csvs(data_dir: Path = DATA_DIR) -> tuple[pd.DataFrame, ...]:
     sales = pd.read_csv(data_dir / "sales.csv", parse_dates=["date"])
     clients = pd.read_csv(data_dir / "clients.csv")
@@ -103,8 +119,9 @@ def _load_from_csvs(data_dir: Path = DATA_DIR) -> tuple[pd.DataFrame, ...]:
     return sales, clients, products, potential, campaigns
 
 
-def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
+def _parse_excel(path: Path, data_dir: Path = DATA_DIR) -> tuple[pd.DataFrame, ...]:
     xl = pd.ExcelFile(path, engine="openpyxl")
+    _save_raw_excel_csvs(xl, data_dir)
 
     ventas = xl.parse("Ventas")
     ventas = ventas.rename(
@@ -322,7 +339,7 @@ def load_all_data(data_dir: str | Path = DATA_DIR, source: str | None = None) ->
     if selected in {"auto", "excel"}:
         path = _excel_path()
         if path is not None:
-            frames = _parse_excel(path)
+            frames = _parse_excel(path, data_dir)
             _save_csvs(*frames, data_dir=data_dir)
             return frames
         if selected == "excel":
