@@ -6,12 +6,12 @@ Smart Demand Signals per al repte d'Inibsa a Interhack 2026.
 
 Clinic Demand Twin transforma històrics de compra de clíniques dentals en alertes comercials accionables.
 
-Per cada parella `client_id + family_id`, l'app calcula un comportament esperat i el compara amb el comportament observat recent. Quan hi ha una desviació rellevant, genera una alerta amb motiu, prioritat, urgència, valor potencial, canal recomanat i una explicació.
+Per cada parella `client_id + family_id`, l'app calcula un comportament esperat amb regles explicables basades en l'històric i el compara amb el comportament observat recent. Quan hi ha una desviació rellevant, genera una alerta amb motiu, prioritat, urgència, valor potencial, canal recomanat i una explicació.
 
 ## Instal·lació
 
 ```bash
-cd "/Users/mohameddaribachiri/Documents/Interhack 2026/interhack2026/clinic-demand-twin"
+cd interhack2026/clinic-demand-twin
 pip install -r requirements.txt
 ```
 
@@ -35,11 +35,13 @@ CLINIC_TWIN_DATA_SOURCE=excel streamlit run app.py
 
 Fonts de dades suportades:
 
-- `data/*.csv`: si existeixen, són la font principal.
-- `../Inibsa challenge/Datasets.xlsx`: si no hi ha CSV, es normalitza l'Excel real i es desa a `data/`.
+- `../Inibsa challenge/Datasets.xlsx`: és la font principal en mode automàtic. Es normalitza i es desa a `data/`.
+- `data/*.csv`: fallback/cache local si l'Excel no està disponible.
 - Mock data: si no hi ha CSV ni Excel, es generen dades sintètiques.
 
-El dataset original del repte és l'Excel `Datasets.xlsx`. Els CSV no són el format original lliurat per Inibsa: són una capa normalitzada que genera l'app perquè la lògica analítica sigui més simple, ràpida i estable durant la demo.
+El dataset original del repte és l'Excel `Datasets.xlsx`. Els CSV normalitzats no són el format original lliurat per Inibsa: són una capa normalitzada que genera l'app perquè la lògica analítica sigui més simple, ràpida i estable durant la demo.
+
+Quan es carrega l'Excel, també es genera una còpia literal de cada full a `data/raw_excel/`. Aquests CSV conserven les columnes originals i no s'utilitzen directament pel model; serveixen per auditoria i traçabilitat.
 
 ## Estructura
 
@@ -49,6 +51,12 @@ clinic-demand-twin/
   requirements.txt
   README.md
   data/
+    raw_excel/
+      potencial.csv
+      clientes.csv
+      productos.csv
+      ventas.csv
+      campanas.csv
     sales.csv
     clients.csv
     products.csv
@@ -106,10 +114,11 @@ El fitxer adjunt d'Inibsa té aquests fulls:
 
 ## Contracte normalitzat intern
 
-L'app converteix `Datasets.xlsx` a aquests CSV interns a `data/`. Aquest és el contracte que consumeixen `preprocessing.py`, `signal_engine.py` i el dashboard.
+L'app converteix `Datasets.xlsx` a aquests CSV interns a `data/`. Les columnes següents són el contracte mínim que consumeixen `preprocessing.py`, `signal_engine.py` i el dashboard. A més, es conserven columnes d'auditoria de l'Excel original per poder traçar d'on surt cada camp.
 
 `sales.csv`
 
+- `invoice_id`
 - `date`
 - `client_id`
 - `product_id`
@@ -123,6 +132,7 @@ L'app converteix `Datasets.xlsx` a aquests CSV interns a `data/`. Aquest és el 
 - `city`
 - `region`
 - `clinic_segment`
+- `source_customer_group`
 
 `products.csv`
 
@@ -131,12 +141,19 @@ L'app converteix `Datasets.xlsx` a aquests CSV interns a `data/`. Aquest és el 
 - `family_id`
 - `family_name`
 - `category_type`: `commodity` o `technical`
+- `source_block`
+- `source_category`
+- `source_family`
 
 `potential.csv`
 
 - `client_id`
 - `family_id`
 - `monthly_potential_units`
+- `allocated_annual_potential_revenue`
+- `source_annual_potential_revenue`
+- `source_category`
+- `source_family`
 
 `campaigns.csv`
 
@@ -145,6 +162,7 @@ L'app converteix `Datasets.xlsx` a aquests CSV interns a `data/`. Aquest és el 
 - `start_date`
 - `end_date`
 - `campaign_name`
+- `family_mapping_inferred`
 
 ## Lògica d'alertes
 
@@ -152,7 +170,7 @@ Commodities:
 
 - Agrega vendes mensuals per client i família.
 - Calcula `capture_rate = historical_avg_units / monthly_potential_units`.
-- Classifica clients com `loyal`, `promiscuous` o `marginal`.
+- Classifica internament clients com `loyal`, `promiscuous` o `marginal`; a la UI es mostra com alta captura, captura parcial o captura baixa.
 - Genera `capture_window`, `churn_risk`, `anomalous_drop` o `replenishment_expected` segons desviació recent, potencial i perfil.
 
 Productes tècnics:
@@ -186,6 +204,8 @@ Pantalles incloses:
 - `Alert Detail`: explicació, recomanació, expected vs observed, potencial i variables clau.
 - `Feedback`: registre d'accions comercials.
 
+El detall d'alerta mostra la data màxima del dataset com a data del model, una banda històrica P10-P90 quan hi ha prou historial i oculta el potencial quan la font real no aporta una estimació útil.
+
 El feedback es desa a:
 
 ```text
@@ -209,5 +229,3 @@ El generador crea:
 - El potencial de l'Excel real es normalitza a unitats aproximades dividint euros per preu mitjà.
 - Les campanyes de l'Excel real no venen lligades a família, així que es repliquen per família durant la normalització.
 - El feedback encara no recalibra el model.
-
-

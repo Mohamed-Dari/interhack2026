@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import uuid
+import hashlib
 
 import pandas as pd
 
 
-def _alert_id() -> str:
-    return uuid.uuid4().hex[:8].upper()
+def _alert_id(client_id, family_id: int, alert_type: str, reference_months: list[str]) -> str:
+    key = f"{client_id}|{family_id}|{alert_type}|{','.join(sorted(reference_months))}"
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:10].upper()
 
 
 def _clinic_name(client_id, clients_df: pd.DataFrame) -> str:
@@ -30,7 +31,7 @@ def _campaign_context(
     if not hits:
         return False, ""
     names = ", ".join(sorted(set(hits)))
-    return True, f"possible efecto campaña: {names}"
+    return True, f"campaña corporativa activa en el periodo: {names}"
 
 
 def _commodity_confidence(n_purchase_months: int, n_reference_months: int) -> str:
@@ -44,7 +45,6 @@ def _commodity_confidence(n_purchase_months: int, n_reference_months: int) -> st
 def _base_alert(row, clients_df: pd.DataFrame, campaign_context: tuple[bool, str]) -> dict:
     has_campaign, campaign_note = campaign_context
     return {
-        "alert_id": _alert_id(),
         "client_id": row["client_id"],
         "clinic_name": _clinic_name(row["client_id"], clients_df),
         "family_id": int(row["family_id"]),
@@ -74,6 +74,7 @@ def generate_commodity_alerts(
         capture_rate = float(row.get("capture_rate", 0) or 0)
         avg_unit_price = float(row.get("avg_unit_price", 100) or 100)
         classification = row.get("client_classification", "marginal")
+        potential_imputed = bool(row.get("potential_imputed", False))
 
         if n_hist_purchase_months < 3 and historical_avg_units < 1:
             continue
@@ -87,7 +88,7 @@ def generate_commodity_alerts(
             if observed_units < expected_units * 0.60:
                 alert_type = "anomalous_drop" if gap_ratio >= 0.60 else "churn_risk"
 
-        elif classification == "promiscuous":
+        elif classification == "promiscuous" and not potential_imputed:
             potential_gap = max(monthly_potential - historical_avg_units, 0) * n_ref
             recent_capture = observed_units / max(potential_units, 1)
             if potential_gap > potential_units * 0.20 and recent_capture < 0.70:
@@ -95,7 +96,7 @@ def generate_commodity_alerts(
                 alert_expected_units = potential_units
                 alert_uncaptured = max(alert_expected_units - observed_units, 0)
 
-        elif classification == "marginal":
+        elif classification == "marginal" and not potential_imputed:
             recent_capture = observed_units / max(potential_units, 1)
             if potential_units >= 8 and recent_capture < 0.25:
                 alert_type = "capture_window"
@@ -103,7 +104,7 @@ def generate_commodity_alerts(
                 alert_uncaptured = max(alert_expected_units - observed_units, 0)
 
         high_potential_low_recent = potential_units >= max(expected_units * 1.4, 10) and observed_units < potential_units * 0.25
-        if alert_type is None and high_potential_low_recent:
+        if alert_type is None and high_potential_low_recent and not potential_imputed:
             alert_type = "capture_window"
             alert_expected_units = potential_units
             alert_uncaptured = max(alert_expected_units - observed_units, 0)
@@ -119,6 +120,7 @@ def generate_commodity_alerts(
         alert = _base_alert(row, clients_df, campaign)
         alert.update(
             {
+                "alert_id": _alert_id(row["client_id"], int(row["family_id"]), alert_type, reference_months),
                 "alert_type": alert_type,
                 "expected_units": round(alert_expected_units, 2),
                 "observed_units": round(observed_units, 2),
@@ -132,6 +134,7 @@ def generate_commodity_alerts(
                 "median_interpurchase_days": None,
                 "n_purchases": None,
                 "avg_unit_price": round(avg_unit_price, 2),
+                "potential_imputed": potential_imputed,
             }
         )
         alerts.append(alert)
@@ -195,6 +198,7 @@ def generate_technical_alerts(
         alert = _base_alert(row, clients_df, campaign)
         alert.update(
             {
+                "alert_id": _alert_id(row["client_id"], family_id, alert_type, reference_months),
                 "alert_type": alert_type,
                 "expected_units": round(expected_units, 2),
                 "observed_units": round(observed_recent, 2),
@@ -208,6 +212,7 @@ def generate_technical_alerts(
                 "median_interpurchase_days": int(round(median_days)),
                 "n_purchases": n_purchases,
                 "avg_unit_price": round(estimated_revenue / max(expected_units, 1), 2),
+                "potential_imputed": monthly_potential <= 0,
             }
         )
         alerts.append(alert)

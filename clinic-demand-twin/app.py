@@ -40,12 +40,35 @@ ALERT_COLORS = {
     "churn_risk": "#dc2626",
     "anomalous_drop": "#7c2d12",
 }
+ALERT_TYPE_LABELS = {
+    "replenishment_expected": "Reposició esperada",
+    "capture_window": "Captura de demanda",
+    "churn_risk": "Risc comercial",
+    "anomalous_drop": "Caiguda anòmala",
+}
+CATEGORY_LABELS = {
+    "commodity": "Consum recurrent",
+    "technical": "Producte tècnic",
+}
+CHANNEL_LABELS = {
+    "delegado": "Delegat",
+    "televenta": "Televenta",
+    "marketing_automation": "Automatització",
+}
+URGENCY_LABELS = {"high": "Alta", "medium": "Mitjana", "low": "Baixa"}
 URGENCY_COLORS = {"high": "#dc2626", "medium": "#f59e0b", "low": "#16a34a"}
+URGENCY_LABEL_COLORS = {"Alta": "#dc2626", "Mitjana": "#f59e0b", "Baixa": "#16a34a"}
+CLASSIFICATION_LABELS = {
+    "loyal": "alta captura histórica",
+    "promiscuous": "captura parcial",
+    "marginal": "captura baja",
+}
 
 
 @st.cache_data(show_spinner="Carregant i processant dades...")
 def build_pipeline() -> dict:
     sales, clients, products, potential, campaigns = load_all_data()
+    model_date = pd.to_datetime(sales["date"]).max() if not sales.empty else pd.NaT
     historical_months, reference_months = get_reference_periods(sales, n_recent=2)
     agg = aggregate_by_family_month(sales, products)
     commodity_stats = compute_commodity_stats(agg, potential, products, historical_months, reference_months)
@@ -53,7 +76,7 @@ def build_pipeline() -> dict:
         sales,
         products,
         reference_months,
-        reference_end_date=pd.to_datetime(sales["date"]).max() if not sales.empty else None,
+        reference_end_date=model_date,
     )
     campaigns_by_family = campaign_calendar(campaigns)
     alerts = generate_all_alerts(
@@ -79,6 +102,7 @@ def build_pipeline() -> dict:
         "reference_months": reference_months,
         "alerts": alerts,
         "source": sales.attrs.get("source", "desconeguda"),
+        "model_date": model_date,
     }
 
 
@@ -99,6 +123,8 @@ with st.sidebar:
     page = st.radio("Navegació", ["Overview", "Alert Ranking", "Alert Detail", "Feedback"])
     st.divider()
     st.caption(f"Font de dades: {data['source']}")
+    if pd.notna(data["model_date"]):
+        st.caption(f"Data del model: {data['model_date'].date()}")
     st.caption(f"Període recent: {', '.join(sorted(reference_months)) or '-'}")
     st.caption(f"Alertes generades: {len(alerts_df)}")
 
@@ -109,85 +135,209 @@ def _empty_alerts_guard() -> None:
         st.stop()
 
 
+def _units_or_na(value) -> str:
+    if value is None or pd.isna(value) or float(value) <= 0:
+        return "n/d"
+    return f"{float(value):,.1f}"
+
+
+def _classification_label(value) -> str:
+    return CLASSIFICATION_LABELS.get(value, value or "-")
+
+
+def _overview_data() -> pd.DataFrame:
+    df = alerts_df.copy()
+    df["alert_type_label"] = df["alert_type"].map(ALERT_TYPE_LABELS).fillna(df["alert_type"])
+    df["category_label"] = df["category_type"].map(CATEGORY_LABELS).fillna(df["category_type"])
+    df["urgency_label"] = df["urgency"].map(URGENCY_LABELS).fillna(df["urgency"])
+    df["channel_label"] = df["recommended_channel"].map(CHANNEL_LABELS).fillna(df["recommended_channel"])
+    return df
+
+
+def _format_eur(value: float) -> str:
+    return f"{value:,.0f} EUR"
+
+
 if page == "Overview":
-    st.title("Overview")
-    st.write("Alertes comercials accionables per prioritzar recuperació, reposició i captura de demanda.")
+    st.title("Overview executiu")
     _empty_alerts_guard()
 
+    overview_df = _overview_data()
     total_alerts = len(alerts_df)
     high_alerts = int((alerts_df["urgency"] == "high").sum())
     opportunity = float(alerts_df["estimated_revenue_opportunity"].sum())
     at_risk = int(alerts_df[alerts_df["alert_type"].isin(["churn_risk", "anomalous_drop"])]["client_id"].nunique())
     capture_windows = int((alerts_df["alert_type"] == "capture_window").sum())
+    top_family = (
+        overview_df.groupby("family_name")["estimated_revenue_opportunity"].sum().sort_values(ascending=False)
+    )
+    top_family_name = top_family.index[0] if not top_family.empty else "-"
+    top_family_value = float(top_family.iloc[0]) if not top_family.empty else 0
+    high_share = high_alerts / total_alerts if total_alerts else 0
+
+    st.caption(
+        f"Dades fins a {data['model_date'].date() if pd.notna(data['model_date']) else '-'} · "
+        f"període recent: {', '.join(sorted(reference_months)) or '-'}"
+    )
+    st.info(
+        f"{high_alerts:,} alertes d'urgència alta ({high_share:.0%} del total). "
+        f"La família amb més oportunitat estimada és {top_family_name} amb {_format_eur(top_family_value)}."
+    )
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Alertes totals", total_alerts)
-    c2.metric("High priority", high_alerts)
-    c3.metric("Oportunitat estimada", f"{opportunity:,.0f} EUR")
+    c1.metric("Alertes", f"{total_alerts:,}")
+    c2.metric("Urgència alta", f"{high_alerts:,}", delta=f"{high_share:.0%}")
+    c3.metric("Oportunitat", _format_eur(opportunity))
     c4.metric("Clients en risc", at_risk)
-    c5.metric("Finestres de captura", capture_windows)
+    c5.metric("Captura demanda", f"{capture_windows:,}")
 
-    left, right = st.columns(2)
+    st.divider()
+
+    left, right = st.columns([1.25, 1])
     with left:
-        counts = alerts_df["alert_type"].value_counts().reset_index()
-        counts.columns = ["alert_type", "alerts"]
-        fig = px.bar(
-            counts,
-            x="alert_type",
-            y="alerts",
-            color="alert_type",
-            color_discrete_map=ALERT_COLORS,
-            labels={"alert_type": "Tipus d'alerta", "alerts": "Alertes"},
+        st.subheader("Mapa de prioritat")
+        scatter = overview_df.copy()
+        scatter["opportunity_k"] = scatter["estimated_revenue_opportunity"] / 1000
+        fig = px.scatter(
+            scatter,
+            x="priority_score",
+            y="estimated_revenue_opportunity",
+            color="alert_type_label",
+            symbol="category_label",
+            size="uncaptured_demand",
+            size_max=18,
+            hover_data={
+                "clinic_name": True,
+                "family_name": True,
+                "urgency_label": True,
+                "channel_label": True,
+                "priority_score": ":.1f",
+                "estimated_revenue_opportunity": ":,.0f",
+                "uncaptured_demand": ":,.1f",
+                "alert_type_label": False,
+                "category_label": False,
+                "opportunity_k": False,
+            },
+            labels={
+                "priority_score": "Prioritat",
+                "estimated_revenue_opportunity": "Oportunitat estimada",
+                "alert_type_label": "Tipus",
+                "category_label": "Categoria",
+            },
+            color_discrete_map={ALERT_TYPE_LABELS[k]: v for k, v in ALERT_COLORS.items()},
         )
-        fig.update_layout(height=320, showlegend=False)
+        fig.update_yaxes(tickprefix="€", separatethousands=True)
+        fig.update_layout(height=390, legend_title_text="", margin=dict(t=20, r=10, b=10, l=10))
         st.plotly_chart(fig, use_container_width=True)
 
     with right:
-        category_counts = alerts_df["category_type"].value_counts().reset_index()
-        category_counts.columns = ["category_type", "alerts"]
-        fig = px.pie(
-            category_counts,
-            names="category_type",
-            values="alerts",
-            hole=0.42,
-            color="category_type",
-            color_discrete_map={"commodity": "#0f766e", "technical": "#6d28d9"},
+        st.subheader("Pla d'acció recomanat")
+        channel_summary = (
+            overview_df.groupby("channel_label", as_index=False)
+            .agg(
+                alertes=("alert_id", "count"),
+                clients=("client_id", "nunique"),
+                alta=("urgency", lambda s: int((s == "high").sum())),
+                oportunitat=("estimated_revenue_opportunity", "sum"),
+            )
+            .sort_values("oportunitat", ascending=False)
         )
-        fig.update_layout(height=320)
-        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(
+            channel_summary,
+            use_container_width=True,
+            hide_index=True,
+            height=175,
+            column_config={
+                "channel_label": st.column_config.TextColumn("Canal"),
+                "alertes": st.column_config.NumberColumn("Alertes"),
+                "clients": st.column_config.NumberColumn("Clients"),
+                "alta": st.column_config.NumberColumn("Alta urgència"),
+                "oportunitat": st.column_config.NumberColumn("Oportunitat", format="%.0f EUR"),
+            },
+        )
+
+        st.subheader("Top alertes")
+        top_alerts = overview_df.head(7)[
+            ["priority_score", "clinic_name", "family_name", "alert_type_label", "channel_label"]
+        ].rename(
+            columns={
+                "priority_score": "Score",
+                "clinic_name": "Clínica",
+                "family_name": "Família",
+                "alert_type_label": "Motiu",
+                "channel_label": "Canal",
+            }
+        )
+        st.dataframe(top_alerts, use_container_width=True, hide_index=True, height=220)
 
     left, right = st.columns(2)
     with left:
-        by_family = (
-            alerts_df.groupby("family_name", as_index=False)["estimated_revenue_opportunity"]
-            .sum()
-            .sort_values("estimated_revenue_opportunity", ascending=True)
-            .tail(10)
+        st.subheader("Motiu de les alertes")
+        counts = (
+            overview_df["alert_type_label"]
+            .value_counts()
+            .reset_index()
         )
+        counts.columns = ["Motiu", "Alertes"]
         fig = px.bar(
-            by_family,
-            x="estimated_revenue_opportunity",
-            y="family_name",
+            counts.sort_values("Alertes"),
+            x="Alertes",
+            y="Motiu",
             orientation="h",
-            labels={"estimated_revenue_opportunity": "Oportunitat EUR", "family_name": "Família"},
+            color="Motiu",
+            color_discrete_map={ALERT_TYPE_LABELS[k]: v for k, v in ALERT_COLORS.items()},
+            text="Alertes",
         )
-        fig.update_layout(height=320)
+        fig.update_traces(textposition="outside")
+        fig.update_layout(height=320, showlegend=False, margin=dict(t=20, r=40, b=10, l=10))
         st.plotly_chart(fig, use_container_width=True)
 
     with right:
-        urgency_counts = alerts_df["urgency"].value_counts().reindex(["high", "medium", "low"]).fillna(0)
-        urgency_counts = urgency_counts.reset_index()
-        urgency_counts.columns = ["urgency", "alerts"]
-        fig = px.bar(
-            urgency_counts,
-            x="urgency",
-            y="alerts",
-            color="urgency",
-            color_discrete_map=URGENCY_COLORS,
-            labels={"urgency": "Urgència", "alerts": "Alertes"},
+        st.subheader("Urgència per categoria")
+        category_urgency = (
+            overview_df.groupby(["category_label", "urgency_label"], as_index=False)
+            .size()
+            .rename(columns={"size": "Alertes"})
         )
-        fig.update_layout(height=320, showlegend=False)
+        fig = px.bar(
+            category_urgency,
+            x="category_label",
+            y="Alertes",
+            color="urgency_label",
+            barmode="stack",
+            color_discrete_map=URGENCY_LABEL_COLORS,
+            category_orders={"urgency_label": ["Alta", "Mitjana", "Baixa"]},
+            labels={"category_label": "Categoria", "urgency_label": "Urgència"},
+        )
+        fig.update_layout(height=320, legend_title_text="", margin=dict(t=20, r=10, b=10, l=10))
         st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("Oportunitat estimada per família")
+    by_family = (
+        overview_df.groupby("family_name", as_index=False)["estimated_revenue_opportunity"]
+        .sum()
+        .sort_values("estimated_revenue_opportunity", ascending=True)
+    )
+    fig = px.bar(
+        by_family,
+        x="estimated_revenue_opportunity",
+        y="family_name",
+        orientation="h",
+        text="estimated_revenue_opportunity",
+        labels={"estimated_revenue_opportunity": "Oportunitat estimada", "family_name": "Família"},
+        color="estimated_revenue_opportunity",
+        color_continuous_scale="Teal",
+    )
+    fig.update_traces(texttemplate="%{text:,.0f} EUR", textposition="outside")
+    fig.update_xaxes(tickprefix="€", separatethousands=True)
+    fig.update_layout(height=320, showlegend=False, coloraxis_showscale=False, margin=dict(t=20, r=80, b=10, l=10))
+    st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("Resum tècnic de la lectura"):
+        st.write(
+            "La prioritat combina severitat de la desviació, oportunitat estimada, urgència i confiança. "
+            "El mapa mostra quines alertes tenen score alt i valor econòmic alt; la taula de canals converteix això en accions comercials."
+        )
 
 
 elif page == "Alert Ranking":
@@ -271,12 +421,14 @@ elif page == "Alert Detail":
         st.markdown("#### Senyal")
         st.metric("Expected units", f"{alert['expected_units']:,.1f}")
         st.metric("Observed units", f"{alert['observed_units']:,.1f}")
-        st.metric("Potential units", f"{alert['potential_units']:,.1f}")
-        st.metric("Uncaptured demand", f"{alert['uncaptured_demand']:,.1f}")
+        st.metric("Potential units", _units_or_na(alert.get("potential_units")))
+        st.metric("Uncaptured demand", _units_or_na(alert.get("uncaptured_demand")))
         if alert["category_type"] == "commodity":
             capture_rate = alert.get("capture_rate")
             st.metric("Capture rate", f"{capture_rate * 100:.0f}%" if pd.notna(capture_rate) else "-")
-            st.metric("Classificació", alert.get("client_classification") or "-")
+            st.metric("Classificació", _classification_label(alert.get("client_classification")))
+            if alert.get("potential_imputed"):
+                st.caption("Potencial estimat internament a partir de l'històric.")
         else:
             st.metric("Dies sense compra", f"{int(alert.get('days_since_last_purchase') or 0)}")
             st.metric("Interval medià", f"{int(alert.get('median_interpurchase_days') or 0)} dies")
@@ -288,9 +440,35 @@ elif page == "Alert Detail":
     all_months = sorted(historical_months | reference_months)
     monthly = pd.DataFrame({"year_month": all_months}).merge(monthly, on="year_month", how="left")
     monthly["units"] = monthly["units"].fillna(0)
-    hist_avg = monthly[monthly["year_month"].isin(historical_months)]["units"].mean() if historical_months else 0
+    hist_units = monthly[monthly["year_month"].isin(historical_months)]["units"] if historical_months else pd.Series(dtype=float)
+    hist_avg = hist_units.mean() if not hist_units.empty else 0
+    hist_p10 = hist_units.quantile(0.10) if len(hist_units) >= 4 else None
+    hist_p90 = hist_units.quantile(0.90) if len(hist_units) >= 4 else None
 
     fig = go.Figure()
+    if hist_p10 is not None and hist_p90 is not None and pd.notna(hist_p10) and pd.notna(hist_p90):
+        fig.add_trace(
+            go.Scatter(
+                x=monthly["year_month"],
+                y=[hist_p90] * len(monthly),
+                mode="lines",
+                line={"width": 0},
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=monthly["year_month"],
+                y=[hist_p10] * len(monthly),
+                mode="lines",
+                name="Banda histórica P10-P90",
+                fill="tonexty",
+                fillcolor="rgba(17, 24, 39, 0.12)",
+                line={"width": 0},
+                hoverinfo="skip",
+            )
+        )
     fig.add_trace(
         go.Bar(
             x=monthly["year_month"],
@@ -316,15 +494,16 @@ elif page == "Alert Detail":
     ]
     if not potential_match.empty:
         monthly_potential = float(potential_match.iloc[0]["monthly_potential_units"])
-        fig.add_trace(
-            go.Scatter(
-                x=monthly["year_month"],
-                y=[monthly_potential] * len(monthly),
-                mode="lines",
-                name="Monthly potential",
-                line={"color": "#f59e0b", "dash": "dot"},
+        if monthly_potential > 0:
+            fig.add_trace(
+                go.Scatter(
+                    x=monthly["year_month"],
+                    y=[monthly_potential] * len(monthly),
+                    mode="lines",
+                    name="Monthly potential",
+                    line={"color": "#f59e0b", "dash": "dot"},
+                )
             )
-        )
     fig.update_layout(height=360, xaxis_title="Mes", yaxis_title="Unitats", legend_orientation="h")
     st.plotly_chart(fig, use_container_width=True)
 

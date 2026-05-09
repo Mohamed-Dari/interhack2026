@@ -123,8 +123,11 @@ def compute_commodity_stats(
         stats["observed_revenue"] / stats["observed_units"].replace(0, np.nan)
     )
     stats["avg_unit_price"] = stats["avg_unit_price"].fillna(100.0)
-    stats["monthly_potential_units"] = stats["monthly_potential_units"].fillna(
-        (stats["historical_avg_units"] * 1.25).clip(lower=1)
+    raw_potential = stats["monthly_potential_units"]
+    stats["potential_imputed"] = raw_potential.isna() | (raw_potential <= 0)
+    stats["monthly_potential_units"] = raw_potential.where(
+        ~stats["potential_imputed"],
+        (stats["historical_avg_units"] * 1.25).clip(lower=1),
     )
     stats["capture_rate"] = (
         stats["historical_avg_units"] / stats["monthly_potential_units"].clip(lower=0.01)

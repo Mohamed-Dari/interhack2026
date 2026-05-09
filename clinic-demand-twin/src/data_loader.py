@@ -1,17 +1,18 @@
 """
 Carga de datos para Clinic Demand Twin.
 
-Orden de prioridad:
-1. CSV locales normalizados en data/
-2. Excel real de Inibsa, normalizado y cacheado en data/
+Orden de prioridad en modo auto:
+1. Excel real de Inibsa, normalizado y cacheado en data/
+2. CSV locales normalizados en data/ como fallback
 3. Datos sintéticos de demo generados por src.mock_data
 
 Esquema interno:
-- sales: date, client_id, product_id, units, revenue
-- clients: client_id, clinic_name, city, region, clinic_segment
-- products: product_id, product_name, family_id, family_name, category_type
-- potential: client_id, family_id, monthly_potential_units
-- campaigns: campaign_id, family_id, start_date, end_date, campaign_name
+- sales: invoice_id, date, client_id, product_id, units, revenue
+- clients: client_id, clinic_name, city, region, clinic_segment, source_customer_group
+- products: product_id, product_name, family_id, family_name, category_type,
+  source_block, source_category, source_family
+- potential: client_id, family_id, monthly_potential_units, columnas de auditoría de potencial
+- campaigns: campaign_id, family_id, start_date, end_date, campaign_name, family_mapping_inferred
 """
 
 from __future__ import annotations
@@ -32,6 +33,14 @@ CSV_FILES = {
     "products": DATA_DIR / "products.csv",
     "potential": DATA_DIR / "potential.csv",
     "campaigns": DATA_DIR / "campaigns.csv",
+}
+
+RAW_SHEET_FILES = {
+    "Potencial": "potencial.csv",
+    "Clientes": "clientes.csv",
+    "Productos": "productos.csv",
+    "Ventas": "ventas.csv",
+    "Campañas": "campanas.csv",
 }
 
 EXCEL_PATH = PROJECT_ROOT.parent / "Inibsa challenge" / "Datasets.xlsx"
@@ -82,6 +91,14 @@ def _save_csvs(
     campaigns.to_csv(data_dir / "campaigns.csv", index=False)
 
 
+def _save_raw_excel_csvs(xl: pd.ExcelFile, data_dir: Path = DATA_DIR) -> None:
+    raw_dir = data_dir / "raw_excel"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    for sheet_name, file_name in RAW_SHEET_FILES.items():
+        raw_df = xl.parse(sheet_name)
+        raw_df.to_csv(raw_dir / file_name, index=False)
+
+
 def _load_from_csvs(data_dir: Path = DATA_DIR) -> tuple[pd.DataFrame, ...]:
     sales = pd.read_csv(data_dir / "sales.csv", parse_dates=["date"])
     clients = pd.read_csv(data_dir / "clients.csv")
@@ -102,12 +119,14 @@ def _load_from_csvs(data_dir: Path = DATA_DIR) -> tuple[pd.DataFrame, ...]:
     return sales, clients, products, potential, campaigns
 
 
-def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
+def _parse_excel(path: Path, data_dir: Path = DATA_DIR) -> tuple[pd.DataFrame, ...]:
     xl = pd.ExcelFile(path, engine="openpyxl")
+    _save_raw_excel_csvs(xl, data_dir)
 
     ventas = xl.parse("Ventas")
     ventas = ventas.rename(
         columns={
+            "Num.Fact": "invoice_id",
             "Fecha": "date",
             "Id. Cliente": "client_id",
             "Id.Cliente": "client_id",
@@ -117,14 +136,16 @@ def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
             "Valores_H": "revenue",
         }
     )
-    sales = ventas[["date", "client_id", "product_id", "units", "revenue"]].copy()
+    sales = ventas[["invoice_id", "date", "client_id", "product_id", "units", "revenue"]].copy()
     sales["date"] = pd.to_datetime(sales["date"], errors="coerce")
+    sales["invoice_id"] = pd.to_numeric(sales["invoice_id"], errors="coerce")
     sales["client_id"] = pd.to_numeric(sales["client_id"], errors="coerce")
     sales["product_id"] = pd.to_numeric(sales["product_id"], errors="coerce")
     sales["units"] = pd.to_numeric(sales["units"], errors="coerce")
     sales["revenue"] = pd.to_numeric(sales["revenue"], errors="coerce")
     sales = sales.dropna(subset=["date", "client_id", "product_id", "units", "revenue"])
     sales = sales[sales["units"] > 0].copy()
+    sales["invoice_id"] = sales["invoice_id"].astype("Int64")
     sales["client_id"] = sales["client_id"].astype(int)
     sales["product_id"] = sales["product_id"].astype(int)
 
@@ -161,12 +182,34 @@ def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
     products["family_name"] = [item[0] for item in display]
     products["category_type"] = [item[1] for item in display]
     products["product_name"] = "Producto " + products["product_id"].astype(str)
-    products = products[["product_id", "product_name", "family_id", "family_name", "category_type"]]
+    products["source_block"] = products["block"]
+    products["source_category"] = products["category_name"]
+    products["source_family"] = products["source_family"]
+    products = products[
+        [
+            "product_id",
+            "product_name",
+            "family_id",
+            "family_name",
+            "category_type",
+            "source_block",
+            "source_category",
+            "source_family",
+        ]
+    ]
 
     cli_raw = xl.parse("Clientes")
-    cli_raw = cli_raw.rename(columns={"Id. Cliente": "client_id", "Id.Cliente": "client_id", "Provincia": "region"})
-    clients = cli_raw[["client_id", "region"]].dropna(subset=["client_id"]).copy()
+    cli_raw = cli_raw.rename(
+        columns={
+            "Id. Cliente": "client_id",
+            "Id.Cliente": "client_id",
+            "Unnamed: 1": "source_customer_group",
+            "Provincia": "region",
+        }
+    )
+    clients = cli_raw[["client_id", "source_customer_group", "region"]].dropna(subset=["client_id"]).copy()
     clients["client_id"] = clients["client_id"].astype(int)
+    clients["source_customer_group"] = clients["source_customer_group"].astype("Int64")
     clients["region"] = clients["region"].fillna("Desconocido")
     clients["city"] = clients["region"]
     clients["clinic_name"] = "Clínica " + clients["client_id"].astype(str)
@@ -184,7 +227,7 @@ def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
         sales_for_segment["clinic_segment"] = "small"
     clients = clients.merge(sales_for_segment[["client_id", "clinic_segment"]], on="client_id", how="left")
     clients["clinic_segment"] = clients["clinic_segment"].fillna("small")
-    clients = clients[["client_id", "clinic_name", "city", "region", "clinic_segment"]]
+    clients = clients[["client_id", "clinic_name", "city", "region", "clinic_segment", "source_customer_group"]]
 
     sales_with_family = sales.merge(products[["product_id", "family_id"]], on="product_id", how="left")
     price_by_family = (
@@ -237,9 +280,14 @@ def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
         expanded_potential["allocated_annual_revenue"] / 12 / expanded_potential["avg_unit_price"].clip(lower=0.01)
     )
     potential = (
-        expanded_potential.groupby(["client_id", "family_id"])["monthly_potential_units"]
-        .sum()
-        .reset_index()
+        expanded_potential.groupby(["client_id", "family_id"], as_index=False)
+        .agg(
+            monthly_potential_units=("monthly_potential_units", "sum"),
+            allocated_annual_potential_revenue=("allocated_annual_revenue", "sum"),
+            source_annual_potential_revenue=("annual_potential_revenue", "sum"),
+            source_category=("category_name", lambda s: " | ".join(sorted(set(map(str, s.dropna()))))),
+            source_family=("potential_family", lambda s: " | ".join(sorted(set(map(str, s.dropna()))))),
+        )
     )
 
     camp_raw = xl.parse("Campañas")
@@ -254,7 +302,17 @@ def _parse_excel(path: Path) -> tuple[pd.DataFrame, ...]:
     campaigns["campaign_id"] = [
         f"real_{i}_{family_id}" for i, family_id in zip(campaigns.index + 1, campaigns["family_id"])
     ]
-    campaigns = campaigns[["campaign_id", "family_id", "start_date", "end_date", "campaign_name"]]
+    campaigns["family_mapping_inferred"] = True
+    campaigns = campaigns[
+        [
+            "campaign_id",
+            "family_id",
+            "start_date",
+            "end_date",
+            "campaign_name",
+            "family_mapping_inferred",
+        ]
+    ]
 
     for df in (sales, clients, products, potential, campaigns):
         df.attrs["source"] = "Excel Inibsa normalitzat"
@@ -278,17 +336,20 @@ def load_all_data(data_dir: str | Path = DATA_DIR, source: str | None = None) ->
             df.attrs["source"] = "Dades sintètiques"
         return frames
 
-    if selected in {"auto", "csv"} and _csvs_exist(data_dir):
-        return _load_from_csvs(data_dir)
-
     if selected in {"auto", "excel"}:
         path = _excel_path()
         if path is not None:
-            frames = _parse_excel(path)
+            frames = _parse_excel(path, data_dir)
             _save_csvs(*frames, data_dir=data_dir)
             return frames
         if selected == "excel":
             raise FileNotFoundError("No s'ha trobat Datasets.xlsx a les rutes esperades.")
+
+    if selected in {"auto", "csv"}:
+        if _csvs_exist(data_dir):
+            return _load_from_csvs(data_dir)
+        if selected == "csv":
+            raise FileNotFoundError("No se han encontrado los CSV normalizados en data/.")
 
     from src.mock_data import generate_all_data
 
